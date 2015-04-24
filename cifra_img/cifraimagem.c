@@ -19,6 +19,8 @@ void cifra_hill(unsigned char *buf, int len);
 void decifra_hill(unsigned char *buf, int len);
 void cifra_tea_ecb(unsigned char *buf, int len);
 void decifra_tea_ecb(unsigned char *buf, int len);
+void cifra_tea_cbc(unsigned char *buf, int len);
+void decifra_tea_cbc(unsigned char *buf, int len);
 
 /* Arquivos passados como parâmetro para o programa */
 FILE *entrada, *saida;
@@ -82,9 +84,9 @@ int main(int argc, char *argv[]) {
 			}
 			if (argv[2][2] == '2') {
 				if (cifrar)
-					cifra_tea_ecb(imagem.pix, imagem.nx * imagem.ny * 3);
+					cifra_tea_cbc(imagem.pix, imagem.nx * imagem.ny * 3);
 				else
-					decifra_tea_ecb(imagem.pix, imagem.nx * imagem.ny * 3);
+					decifra_tea_cbc(imagem.pix, imagem.nx * imagem.ny * 3);
 				break;
 			}
 	}
@@ -189,9 +191,6 @@ void cifra_hill(unsigned char *buf, int len) {
 	do{
 		key = chave_cifra_hill();
 
-		printf("%d %d\n", key[0][0],key[0][1]); 
-		printf("%d %d\n", key[1][0],key[1][1]);
-
 		invertivel = verifica_invertivel(key);
 
 		if (!invertivel){
@@ -284,25 +283,184 @@ void cifra_tea(long* v, long* k) {
 }
 
 /* Função para ler as chaves para TEA */
-unsigned long *chave_tea(){
+long *chave_tea(){
 	unsigned long int *key;
 	int i;
 
-	key = (long *) calloc(4, 1+sizeof (long));
+	key = (long *) calloc(4, sizeof (long));
 	printf("Digite as 4 chaves(em hexadecimal):\n");
 	scanf("%lx %lx %lx %lx", &key[0], &key[1], &key[2], &key[3]);
 
 	return key;
 }
 
+/* Função que cifra com TEA utilizando o modo ECB */
 void cifra_tea_ecb(unsigned char *buf, int len) {
-	unsigned long *key;
-	
+	long *key;
+	long *data;
+	int indice=0;
+
+	data = (long *) calloc(2, sizeof (long));
+
 	key = chave_tea();
-	
-	
-	
+
+	while ((indice<len)&&(indice+7<len)){
+		data[0] = (buf[indice] << 24);
+		data[0] = data[0] | (buf[indice+1] << 16);
+		data[0] = data[0] | (buf[indice+2] << 8);
+		data[0] = data[0] | (buf[indice+3]);
+		data[1] = (buf[indice+4] << 24);
+		data[1] = data[1] | (buf[indice+5] << 16);
+		data[1] = data[1] | (buf[indice+6] << 8);
+		data[1] = data[1] | (buf[indice+7]);
+		cifra_tea(data, key);
+		buf[indice] = data[0] >> 24;
+		buf[indice+1] = data[0] >> 16;
+		buf[indice+2] = data[0] >> 8;
+		buf[indice+3] = data[0];
+		buf[indice+4] = data[1] >> 24;
+		buf[indice+5] = data[1] >> 16;
+		buf[indice+6] = data[1] >> 8;
+		buf[indice+7] = data[1];
+		indice = indice + 8;	
+	}
+
 }
 
+/* Função para decifrar um bloco em TEA, obtida do paper disponilizado*/
+void decifra_tea(long* v,long* k) {
+	unsigned long n=32, sum, y=v[0], z=v[1],
+	delta=0x9e3779b9 ;
+	sum=delta<<5 ;
+
+	while (n-->0) {
+		z-= ((y<<4)+k[2]) ^ (y+sum) ^ ((y>>5)+k[3]) ;
+		y-= ((z<<4)+k[0]) ^ (z+sum) ^ ((z>>5)+k[1]) ;
+		sum-=delta ; 
+	}
+
+	v[0]=y ; v[1]=z ; 
+}
+
+/* Função que decifra uma imagem cifrada com TEA em modo ECB*/
 void decifra_tea_ecb(unsigned char *buf, int len) {
+	long *key;
+	long *data;
+	int indice=0;
+
+	data = (long *) calloc(2, sizeof (long));
+
+	key = chave_tea();
+
+	while ((indice<len)&&(indice+7<len)){
+		data[0] = (buf[indice] << 24);
+		data[0] = data[0] | (buf[indice+1] << 16);
+		data[0] = data[0] | (buf[indice+2] << 8);
+		data[0] = data[0] | (buf[indice+3]);
+		data[1] = (buf[indice+4] << 24);
+		data[1] = data[1] | (buf[indice+5] << 16);
+		data[1] = data[1] | (buf[indice+6] << 8);
+		data[1] = data[1] | (buf[indice+7]);
+		decifra_tea(data, key);
+		buf[indice] = data[0] >> 24;
+		buf[indice+1] = data[0] >> 16;
+		buf[indice+2] = data[0] >> 8;
+		buf[indice+3] = data[0];
+		buf[indice+4] = data[1] >> 24;
+		buf[indice+5] = data[1] >> 16;
+		buf[indice+6] = data[1] >> 8;
+		buf[indice+7] = data[1];
+		indice = indice + 8;	
+	}
+}
+
+/* Função que cifra TEA utilizando o modo CBC */
+void cifra_tea_cbc(unsigned char *buf, int len) {
+	long *key;
+	long *data;
+	int indice=0;
+	long *plain_text;
+
+	data = (long *) calloc(2, sizeof (long));
+	plain_text = (long *) calloc(2, sizeof (long));
+
+	key = chave_tea();
+/* Vetor de Inicialização */
+	data[0] = 0x25061991;
+	data[1] = 0x19031997;
+	while ((indice<len)&&(indice+7<len)){
+		plain_text[0] = (buf[indice] << 24);
+		plain_text[0] = plain_text[0] | (buf[indice+1] << 16);
+		plain_text[0] = plain_text[0] | (buf[indice+2] << 8);
+		plain_text[0] = plain_text[0] | (buf[indice+3]);
+		plain_text[1] = (buf[indice+4] << 24);
+		plain_text[1] = plain_text[1] | (buf[indice+5] << 16);
+		plain_text[1] = plain_text[1] | (buf[indice+6] << 8);
+		plain_text[1] = plain_text[1] | (buf[indice+7]);
+
+		data[0] = plain_text[0] ^ data[0];
+		data[1] = plain_text[1] ^ data[1];
+
+		cifra_tea(data, key);
+
+		buf[indice] = data[0] >> 24;
+		buf[indice+1] = data[0] >> 16;
+		buf[indice+2] = data[0] >> 8;
+		buf[indice+3] = data[0];
+		buf[indice+4] = data[1] >> 24;
+		buf[indice+5] = data[1] >> 16;
+		buf[indice+6] = data[1] >> 8;
+		buf[indice+7] = data[1];
+		indice = indice + 8;	
+	}
+
+}
+
+/* Função que decifra TEA utilizando o modo CBC */
+void decifra_tea_cbc(unsigned char *buf, int len) {
+	long *key;
+	long *data;
+	int indice=0;
+	long *cipher_text;
+	long *cipher_text_aux;
+
+	data = (long *) calloc(2, sizeof (long));
+	cipher_text = (long *) calloc(2, sizeof (long));
+	cipher_text_aux = (long *) calloc(2, sizeof (long));
+
+	key = chave_tea();
+/* Vetor de Inicialização */
+	data[0] = 0x25061991;
+	data[1] = 0x19031997;
+	while ((indice<len)&&(indice+7<len)){
+		cipher_text[0] = (buf[indice] << 24);
+		cipher_text[0] = cipher_text[0] | (buf[indice+1] << 16);
+		cipher_text[0] = cipher_text[0] | (buf[indice+2] << 8);
+		cipher_text[0] = cipher_text[0] | (buf[indice+3]);
+		cipher_text[1] = (buf[indice+4] << 24);
+		cipher_text[1] = cipher_text[1] | (buf[indice+5] << 16);
+		cipher_text[1] = cipher_text[1] | (buf[indice+6] << 8);
+		cipher_text[1] = cipher_text[1] | (buf[indice+7]);
+		cipher_text_aux[0] = cipher_text[0];
+		cipher_text_aux[1] = cipher_text[1];
+
+		decifra_tea(cipher_text, key);
+
+		data[0] = data[0] ^ cipher_text[0];
+		data[1] = data[1] ^ cipher_text[1];
+	
+		buf[indice] = data[0] >> 24;
+		buf[indice+1] = data[0] >> 16;
+		buf[indice+2] = data[0] >> 8;
+		buf[indice+3] = data[0];
+		buf[indice+4] = data[1] >> 24;
+		buf[indice+5] = data[1] >> 16;
+		buf[indice+6] = data[1] >> 8;
+		buf[indice+7] = data[1];
+		
+		data[0] = cipher_text_aux[0];
+		data[1] = cipher_text_aux[1];
+		indice = indice + 8;	
+	}
+
 }
